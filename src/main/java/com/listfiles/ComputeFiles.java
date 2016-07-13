@@ -23,97 +23,83 @@ public class ComputeFiles {
 	}
 
 	public void compute(final boolean logOutputToFile) throws IOException, NoSuchAlgorithmException {
-		Map<Path, String> result = new HashMap<Path, String>();
+
+		// obtain all files
 		FileSearcher lf = new FileSearcher(this.origin);
 		List<Path> allFiles = lf.getList();
+
+		List<Record> result = new ArrayList<Record>();
+
+		// compute hash for every file, also add file path + hash to list
 		for (Path entry : allFiles) {
 			if (Files.isDirectory(entry))
 				continue;
 			MessageDigest md = MessageDigest.getInstance("MD5");
-			//System.out.println(entry);
 			try (InputStream is = Files.newInputStream(entry); DigestInputStream dis = new DigestInputStream(is, md)) {
-				byte[] buffer = new byte[ 4096 ];
-				while (dis.read(buffer) != -1) { /* Does nothing with contents */ };
+				byte[] buffer = new byte[4096]; // 4096 8192 16384 http://stackoverflow.com/questions/236861/how-do-you-determine-the-ideal-buffer-size-when-using-fileinputstream
+				while (dis.read(buffer) != -1) {
+					// Does nothing with contents
+				}
 				dis.close();
 			}
-			result.put(entry, Digest.getDigestHash(md.digest()));
+			result.add(new Record(Digest.getDigestHash(md.digest()), entry));
 		}
 
-		Map<String, Integer> resultHits = new HashMap<String, Integer>();
-
-		for (Map.Entry<Path, String> entry : result.entrySet()) {
-			final String s = entry.getValue();
-			if (resultHits.containsKey(s)) {
-				final int count = resultHits.get(s) + 1;
-
-				// do not need to save the old value when putting in the new count
-				/* final int oldValue = */ resultHits.put(s, count);
+		// attempt to condense the results based on same hashes
+		Map<String, List<Path>> redux = new HashMap<String, List<Path>>();
+		for (Record r : result) {
+			if (redux.containsKey(r.getHash())) {
+				List<Path> indexed = redux.get(r.getHash());
+				indexed.add(r.getFilePath());
+				redux.put(r.getHash(), indexed);
 			} else {
-				resultHits.put(s, 1);
+				List<Path> indexed = new ArrayList<Path>();
+				indexed.add(r.getFilePath());
+				redux.put(r.getHash(), indexed);
 			}
 		}
-
-		List<String> dupes = null;
-		if (logOutputToFile)
-			dupes = new ArrayList<String>();
-
-		int entryCount = 0;
-
-		//BigInteger fileSize = BigInteger.ZERO;
-		long fileSize = 0L;
-
-		for (Map.Entry<String, Integer> entry : resultHits.entrySet()) {
-
-			if (entry.getValue() < 2)
-				continue;
-
-			StringBuilder sb = new StringBuilder();
-
-			sb.append("Entry # = ");
-			sb.append(entryCount);
-			++entryCount;
-
-			sb.append(System.getProperty("line.separator"));
-
-			sb.append("Hash = ");
-			sb.append(entry.getKey());
-			sb.append(", hit count = ");
-			sb.append(entry.getValue());
-
-			sb.append(System.getProperty("line.separator"));
-
-			List<Path> temp = getKeysFromValue(entry.getKey(), result);
-
-			long fs = Files.size(temp.get(0));
-			long ttl_fs = fs * (entry.getValue() - 1);
-
-			sb.append("Original File Size = " + humanReadableByteCount(fs, true));
-			sb.append("Total Size = " + humanReadableByteCount(ttl_fs, true));
-
-			sb.append(System.getProperty("line.separator"));
-
-			sb.append("Associated File Paths = ");
-			sb.append(System.getProperty("line.separator"));
-			
-			for (Path p : temp) {
-				sb.append(p.toString());
-				sb.append(System.getProperty("line.separator"));
-			}
-
-			//fileSize = fileSize.add(BigInteger.valueOf(ttl_fs));
-			fileSize += ttl_fs;
-			sb.append(System.getProperty("line.separator"));
-
-			if (logOutputToFile)
-				dupes.add(sb.toString());
-		}
-
-		//System.out.println("Excess disk space used: " + fileSize.toString() + " bytes");
-
-		System.out.print("Excess disk space used: " + fileSize + " bytes");
-		System.out.println(" or " + humanReadableByteCount(fileSize, true));
 
 		if (logOutputToFile) {
+			List<String> findings = new ArrayList<String>();
+
+			final String nl = System.getProperty("line.separator");
+
+			long diskSpaceSum = 0L;
+
+			for (Map.Entry<String, List<Path>> entry : redux.entrySet()) {
+				final List<Path> dupeFiles = entry.getValue();
+				final int hits = dupeFiles.size();
+				if (hits < 2) {
+					continue; // b/c not a duplicate finding, when there are not 2 or more counts of the same hash
+				}
+				final String hash = entry.getKey();
+
+				StringBuilder sb = new StringBuilder();
+				sb.append("hash = " + hash + nl); // String concatenation = http://stackoverflow.com/questions/1532461/stringbuilder-vs-string-concatenation-in-tostring-in-java
+				sb.append("hits = " + hits + nl);
+
+				sb.append("original file size = ");
+				final long fs = Files.size(dupeFiles.get(0));
+				sb.append(fs);
+				sb.append(nl);
+
+				sb.append("total disk space = ");
+				final long ttlfs = fs * hits;
+				sb.append(ttlfs);
+				sb.append(nl);
+
+				diskSpaceSum += ttlfs;
+
+				sb.append("associated file paths = ");
+				sb.append(nl);
+				for (Path p : dupeFiles) {
+					sb.append(p.toString() + nl);
+				}
+
+				findings.add(sb.toString());
+			}
+
+			findings.add("Total disk space covered with duplicates: " + humanReadableByteCount(diskSpaceSum, true));
 
 			StringBuilder fileName = new StringBuilder();
 			fileName.append(this.origin.toString());
@@ -126,19 +112,8 @@ public class ComputeFiles {
 
 			Files.createFile(filePath);
 
-			StringBuilder ln = new StringBuilder();
-			ln.append("Excess disk space used: ");
-			ln.append(String.valueOf(fileSize));
-			ln.append(" bytes or ");
-			ln.append(humanReadableByteCount(fileSize, true));
-			ln.append(System.getProperty("line.separator"));
-
-			final List<String> firstLine = new ArrayList<String>();
-			firstLine.add(ln.toString());
-
-			Files.write(filePath, firstLine, StandardCharsets.UTF_8);
-
-			Files.write(filePath, dupes, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+			Files.write(filePath, findings, StandardCharsets.UTF_8);
+			//Files.write(filePath, findings, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
 		}
 	}
 
