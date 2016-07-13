@@ -87,8 +87,8 @@ public class ComputeFiles {
 			long fs = Files.size(temp.get(0));
 			long ttl_fs = fs * (entry.getValue() - 1);
 
-			sb.append("Original File Size = " + fs);
-			sb.append("Total Size = " + ttl_fs);
+			sb.append("Original File Size = " + humanReadableByteCount(fs, true));
+			sb.append("Total Size = " + humanReadableByteCount(ttl_fs, true));
 
 			sb.append(System.getProperty("line.separator"));
 
@@ -111,7 +111,7 @@ public class ComputeFiles {
 		//System.out.println("Excess disk space used: " + fileSize.toString() + " bytes");
 
 		System.out.print("Excess disk space used: " + fileSize + " bytes");
-		System.out.println(" or " + fileSize);
+		System.out.println(" or " + humanReadableByteCount(fileSize, true));
 
 		if (logOutputToFile) {
 
@@ -130,7 +130,7 @@ public class ComputeFiles {
 			ln.append("Excess disk space used: ");
 			ln.append(String.valueOf(fileSize));
 			ln.append(" bytes or ");
-			ln.append(fileSize);
+			ln.append(humanReadableByteCount(fileSize, true));
 			ln.append(System.getProperty("line.separator"));
 
 			final List<String> firstLine = new ArrayList<String>();
@@ -140,6 +140,15 @@ public class ComputeFiles {
 
 			Files.write(filePath, dupes, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
 		}
+	}
+
+	// http://stackoverflow.com/questions/3758606/how-to-convert-byte-size-into-human-readable-format-in-java
+	private static String humanReadableByteCount(long bytes, boolean si) {
+	    int unit = si ? 1000 : 1024;
+	    if (bytes < unit) return bytes + " B";
+	    int exp = (int) (Math.log(bytes) / Math.log(unit));
+	    String pre = (si ? "kMGTPE" : "KMGTPE").charAt(exp-1) + (si ? "" : "i");
+	    return String.format("%.1f %sB", bytes / Math.pow(unit, exp), pre);
 	}
 
 	// http://stackoverflow.com/questions/4005816/map-how-to-get-all-keys-associated-with-a-value
